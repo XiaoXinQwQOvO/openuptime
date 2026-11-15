@@ -628,6 +628,8 @@ export interface Repo {
   /** Is the incident on one of the key's projects (or not tied to a monitor)? */
   incidentVisible(orgId: string, id: string, scope: Scope): Promise<boolean>;
   incidentDetail(orgId: string, id: string): Promise<IncidentDetail | null>;
+  /** Permanently removes an incident, its updates and notification records. False when it was not found. */
+  deleteIncident(orgId: string, id: string): Promise<boolean>;
   createIncident(inc: NewIncident, firstUpdate?: NewIncidentUpdate): Promise<Incident>;
   /**
    * Opens an automatic incident unless the monitor already has an open one of that kind (outage or latency): then

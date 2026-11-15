@@ -42,6 +42,14 @@ describe("openuptime mcp tools", () => {
     expect(calls[2].body).toMatchObject({ name: "api", type: "http", intervalSec: 60 });
   });
 
+  it("maps incident deletion onto its destructive REST endpoint", async () => {
+    calls.length = 0;
+    await rpc(1, "tools/call", { name: "delete_incident", arguments: { id: ID } });
+    expect(calls[0]).toEqual({ method: "DELETE", path: `/api/incidents/${ID}` });
+    const { result } = await rpc(2, "tools/list");
+    expect(result.tools.find((t: any) => t.name === "delete_incident").annotations).toMatchObject({ destructiveHint: true, idempotentHint: true });
+  });
+
   it("exposes a read-only preview and a scoped import with unchanged identities", async () => {
     calls.length = 0;
     const input = { source: "backup:prod", monitors: [{ sourceId: "12", name: "API", target: "https://1.1.1.1/" }] };

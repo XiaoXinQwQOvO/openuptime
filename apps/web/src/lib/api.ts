@@ -262,6 +262,7 @@ export const api = {
   declareIncident: (b: { title: string; body?: string; severity?: "minor" | "major"; monitorId?: string | null; visibility?: "public" | "internal" }) =>
     req<Incident>("/incidents", { method: "POST", body: JSON.stringify(b) }),
   incident: (id: string) => req<Incident>(`/incidents/${id}`),
+  deleteIncident: (id: string) => req<void>(`/incidents/${id}`, { method: "DELETE" }),
   postUpdate: (id: string, b: { status: Incident["status"]; body: string; visibility?: "public" | "internal" }) =>
     req(`/incidents/${id}/updates`, { method: "POST", body: JSON.stringify(b) }),
   saveWriteUp: (id: string, b: { rootCause?: string | null; postmortem?: string | null; publishPostmortem?: boolean }) =>

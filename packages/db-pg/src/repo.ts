@@ -1149,6 +1149,16 @@ export function createRepo(db: DbExecutor): Repo {
       ]);
       return { incident: inc, updates, monitor, assignee, checks };
     },
+    async deleteIncident(orgId, id) {
+      return db.transaction(async (tx) => {
+        const owned = and(eq(schema.incident.id, id), eq(schema.incident.organizationId, orgId));
+        // Notification history has no foreign key to the incident. Remove it first so a queued retry cannot outlive the
+        // event it describes; deleting these rows also cascades to the MCP alert outbox.
+        await tx.delete(schema.alertDelivery).where(and(eq(schema.alertDelivery.organizationId, orgId), eq(schema.alertDelivery.incidentId, id)));
+        const res = await tx.delete(schema.incident).where(owned);
+        return affected(res) > 0;
+      });
+    },
     async createIncident(inc, firstUpdate) {
       // the incident and its first update land together or not at all
       return db.transaction(async (tx) => {

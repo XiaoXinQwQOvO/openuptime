@@ -84,6 +84,7 @@ export const TOOLS: Tool[] = [
     build: ({ id, ...rest }) => ({ method: "POST", path: `/api/incidents/${id}/updates`, body: rest }),
   },
   { name: "acknowledge_incident", description: "Assign an existing incident to the authenticated caller and return the incident record. Use this when taking ownership of an investigation; it does not resolve the incident or post a subscriber update. Use post_incident_update to communicate status, and list_incidents to discover the incident UUID.", schema: z.object({ id }), build: (a) => ({ method: "POST", path: `/api/incidents/${a.id}/ack` }) },
+  { name: "delete_incident", idempotent: true, description: "Permanently remove an incident, its timeline updates and its notification records; the public status page stops showing it. Requires workspace owner/admin access. Use this only when the user explicitly asks to delete the incident, not to resolve it. Returns an empty success response; the incident cannot be recovered through this tool.", schema: z.object({ id }), destructive: true, build: (a) => ({ method: "DELETE", path: `/api/incidents/${a.id}` }) },
   { name: "list_status_pages", description: "Read status-page records and UUIDs in the selected project for management. Use these ids with update_status_page; use get_public_status_page with a slug to read the published component/outage summary instead. This private list does not include pages outside the selected project.", schema: z.object({}), readOnly: true, build: () => ({ method: "GET", path: "/api/status-pages" }) },
   {
     name: "create_status_page",

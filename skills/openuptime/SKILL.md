@@ -34,6 +34,7 @@ Verify with `openuptime:run_check` and report the real result, not an assumption
 3. `openuptime:acknowledge_incident` when the user is taking it.
 4. `openuptime:post_incident_update` with `status` `investigating`, `identified`, `monitoring` or `resolved`. Public updates (the default) notify subscribers and show on status pages, so write what is known and nothing speculative; pass `visibility` `internal` for notes only your team should see.
 5. Open a manual incident with `openuptime:create_incident` (`severity` `minor` or `major`, optional `monitorId`) for problems no monitor caught. After resolving, record `rootCause` and `postmortem` with `openuptime:update_incident`; both become public once the incident is resolved.
+6. Use `openuptime:delete_incident` only when the user explicitly asks to remove an incident and has owner or admin access. Deleting is permanent and also removes its updates and notification records.
 
 ## Planned maintenance
 

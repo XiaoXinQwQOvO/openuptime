@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { notifyIncidentUpdate } from "../alerts";
 import type { AppEnv } from "../env";
-import { listedProjects, uuidParams } from "../middleware";
+import { listedProjects, requireManager, uuidParams } from "../middleware";
 import { purgePublicStatus } from "./status";
 
 const visibility = z.enum(["public", "internal"]);
@@ -51,6 +51,14 @@ export const incidents = new Hono<AppEnv>()
     if (!d) return c.json({ error: "Not found" }, 404);
     const deliveries = await repo.incidentDeliveries(c.get("orgId"), id);
     return c.json({ ...d.incident, updates: d.updates, monitor: d.monitor, assignee: d.assignee, checks: d.checks, deliveries });
+  })
+  .delete("/:id", uuidParams, requireManager, async (c) => {
+    const repo = c.get("repo");
+    const id = c.req.param("id");
+    if (!(await repo.incidentVisible(c.get("orgId"), id, c.get("projectScope")))) return c.json({ error: "Not found" }, 404);
+    if (!(await repo.deleteIncident(c.get("orgId"), id))) return c.json({ error: "Not found" }, 404);
+    purgePublicStatus();
+    return c.body(null, 204);
   })
   .patch(
     "/:id",

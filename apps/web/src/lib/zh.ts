@@ -184,6 +184,7 @@ export const zh: Record<string, string> = {
   "No incidents": "没有事件", "Quiet is good.": "风平浪静。", Incident: "事件", Started: "开始", Resolved: "已解决", resolved: "已解决",
   investigating: "排查中", identified: "已定位", monitoring: "观察中",
   "← Incidents": "← 事件", Acknowledge: "确认", started: "开始于", acknowledged: "已确认",
+  "Delete incident": "删除事件", "Delete this incident? This cannot be undone.": "删除这个事件？此操作无法撤销。",
   "Post an update": "发布更新", "What do customers need to know?": "客户需要知道什么？", "Publish update": "发布更新", Timeline: "时间线",
   // status pages
   "Public pages your customers can check before they email you.": "让客户在给你发邮件之前，先自己看一眼的公开页面。",

@@ -12,9 +12,11 @@ const inc = { id: ID, organizationId: "org", title: "T", monitorId: null, projec
 
 function app() {
   const repo = {
+    memberRole: async () => "owner",
     incidentVisible: async () => true,
     updateIncidentWriteUp: async () => inc,
     createIncident: async () => inc,
+    deleteIncident: async () => true,
     postIncidentUpdate: async () => ({ incident: inc, update: { id: "u", visibility: "public" } }),
   } as unknown as Repo;
   return new Hono()
@@ -44,11 +46,24 @@ describe("incident writes refresh the public status page", () => {
     expect(purgePublicStatus).toHaveBeenCalledTimes(2);
   });
 
+  it("purges after deleting an incident", async () => {
+    expect((await send("DELETE", `/${ID}`, undefined)).status).toBe(204);
+    expect(purgePublicStatus).toHaveBeenCalledTimes(1);
+  });
+
   it("does not purge when the incident is not found", async () => {
     const missing = new Hono()
-      .use("*", async (c, next) => { c.set("repo" as never, { incidentVisible: async () => false } as never); c.set("orgId" as never, "org" as never); await next(); })
+      .use("*", async (c, next) => { c.set("repo" as never, { memberRole: async () => "owner", incidentVisible: async () => false } as never); c.set("orgId" as never, "org" as never); c.set("userId" as never, "u" as never); await next(); })
       .route("/incidents", incidents as never);
-    expect((await missing.request(`/incidents/${ID}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ publishPostmortem: true }) })).status).toBe(404);
+    expect((await missing.request(`/incidents/${ID}`, { method: "DELETE" })).status).toBe(404);
+    expect(purgePublicStatus).not.toHaveBeenCalled();
+  });
+
+  it("refuses deletion by a member", async () => {
+    const member = new Hono()
+      .use("*", async (c, next) => { c.set("repo" as never, { memberRole: async () => "member" } as never); c.set("orgId" as never, "org" as never); c.set("userId" as never, "u" as never); await next(); })
+      .route("/incidents", incidents as never);
+    expect((await member.request(`/incidents/${ID}`, { method: "DELETE" })).status).toBe(403);
     expect(purgePublicStatus).not.toHaveBeenCalled();
   });
 });

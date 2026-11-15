@@ -435,6 +435,22 @@ describe.skipIf(!url)("incident numbers and update visibility", () => {
     expect(await repo.updateIncidentWriteUp(`${orgId}-other`, inc.id, { rootCause: "x" })).toBeNull();
   });
 
+  it("deletes an incident, its updates and its notification records", async () => {
+    const inc = await repo.createIncident(
+      { organizationId: orgId, projectId, title: "remove" },
+      { status: "investigating", body: "first", visibility: "public" },
+    );
+    await repo.logDeliveries([{ organizationId: orgId, projectId, incidentId: inc.id, channelName: "hook", channelType: "webhook", kind: "incident.opened", ok: true }]);
+    const deliveries = () => db.select().from(schema.alertDelivery).where(eq(schema.alertDelivery.incidentId, inc.id));
+    expect(await deliveries()).toHaveLength(1);
+
+    expect(await repo.deleteIncident(`${orgId}-other`, inc.id)).toBe(false);
+    expect((await repo.incidentDetail(orgId, inc.id))?.updates).toHaveLength(1);
+    expect(await repo.deleteIncident(orgId, inc.id)).toBe(true);
+    expect(await repo.incidentDetail(orgId, inc.id)).toBeNull();
+    expect(await deliveries()).toEqual([]);
+  });
+
   it("keeps internal updates off every public read path but shows them to the team", async () => {
     const m = await monitorIn(projectId);
     const [page] = await insertInto(db, schema.statusPage).values({ organizationId: orgId, projectId, slug: `p${crypto.randomUUID().slice(0, 8)}`, title: "T" }).returning();

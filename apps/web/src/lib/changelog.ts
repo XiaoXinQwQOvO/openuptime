@@ -29,6 +29,14 @@ export interface ChangelogEntry {
 /** Community entries, newest first within a day. Cloud-only entries are added by changelog-cloud.ts. */
 export const COMMUNITY_ENTRIES: ChangelogEntry[] = [
   {
+    id: "delete-incidents", date: "2026-11-15", edition: "community",
+    title: { en: "Delete incidents", zh: "删除事件" },
+    summary: { en: "Workspace owners and admins can now permanently remove an incident from its detail page.", zh: "工作区所有者和管理员现在可以在事件详情页永久删除该事件。" },
+    points: [
+      { en: "Deleting removes its timeline updates and notification records, and takes it off public status pages immediately.", zh: "删除操作会移除事件的时间线更新和通知记录，并立即从公开状态页上撤下该事件。" },
+    ],
+  },
+  {
     id: "zh-hans-status-page-language", date: "2026-11-15", edition: "community",
     title: { en: "Chinese status pages in Chinese", zh: "中文状态页显示中文" },
     summary: { en: "The Chinese address of a status page now renders the page in Chinese, not just its language tag.", zh: "状态页的中文地址现在会把页面内容渲染成中文，而不只是标记语言。" },

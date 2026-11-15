@@ -1,4 +1,4 @@
-import { adoptProject, backToAll } from "../lib/nav";
+import { adoptProject, backToAll, navigate } from "../lib/nav";
 import { t } from "../lib/i18n";
 import { fmtTime } from "../lib/time";
 import { useEffect, useState } from "react";
@@ -27,6 +27,7 @@ export default function IncidentDetail({ id }: { id: string }) {
   const [saved, setSaved] = useState(false);
   const [busy, run] = useBusy();
   const [acking, ack] = useBusy();
+  const [deleting, remove] = useBusy();
   const [err, setErr] = useState("");
   const load = () => api.incident(id).then((i) => { adoptProject(i.projectId); setInc(i); setStatus(i.status === "resolved" ? "resolved" : i.status); setRootCause(i.rootCause ?? ""); setPostmortem(i.postmortem ?? ""); setPublish(!!i.postmortemPublishedAt); });
   useEffect(() => { load(); }, [id]);
@@ -49,8 +50,15 @@ export default function IncidentDetail({ id }: { id: string }) {
         <h1 className="serif">{inc.title}</h1>
         <span className={`pill ${resolved ? "resolved" : "down"}`}>{t(inc.status)}</span>
         <div className="dh-acts">
-          {!inc.acknowledgedAt && !resolved && <button className="btn" disabled={acking} onClick={() => ack(() => api.ack(id).then(load).catch((e: Error) => setErr(e.message)))}>{acking ? t("Acknowledging…") : t("Acknowledge")}</button>}
-          {!resolved && <button className="btn primary" disabled={busy} onClick={() => post("resolved", body.trim() || t("This incident has been resolved."))}>{t("Resolve")}</button>}
+          {!inc.acknowledgedAt && !resolved && <button className="btn" disabled={acking || deleting} onClick={() => ack(() => api.ack(id).then(load).catch((e: Error) => setErr(e.message)))}>{acking ? t("Acknowledging…") : t("Acknowledge")}</button>}
+          {!resolved && <button className="btn primary" disabled={busy || deleting} onClick={() => post("resolved", body.trim() || t("This incident has been resolved."))}>{t("Resolve")}</button>}
+          <button className="btn danger-l" disabled={busy || acking || deleting} onClick={() => {
+            if (!confirm(t("Delete this incident? This cannot be undone."))) return;
+            setErr("");
+            remove(async () => {
+              try { await api.deleteIncident(id); navigate("/app/incidents"); } catch (e) { setErr((e as Error).message); }
+            });
+          }}>{deleting ? t("Deleting…") : t("Delete incident")}</button>
         </div>
       </div>
       <div className="url">
