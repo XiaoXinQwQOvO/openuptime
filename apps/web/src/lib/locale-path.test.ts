@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { splitLocale, stripLocale, withLocale } from "./locale-path";
+import { renderedPerRequest, splitLocale, stripLocale, withLocale } from "./locale-path";
 
 describe("locale paths", () => {
   it("splits prefixes", () => {
@@ -10,6 +10,12 @@ describe("locale paths", () => {
     expect(splitLocale("/jap/app")).toEqual({ locale: null, rest: "/jap/app" });
   });
   it("strips", () => expect(stripLocale("/zh-Hans/login")).toBe("/login"));
+  it("knows the pages rendered per request", () => {
+    expect(renderedPerRequest("/status/nya")).toBe(true);
+    expect(renderedPerRequest("/status")).toBe(true);
+    expect(renderedPerRequest("/statuses")).toBe(false);
+    expect(renderedPerRequest("/app")).toBe(false);
+  });
   it("adds prefixes without doubling", () => {
     expect(withLocale("/app", "zh-CN")).toBe("/zh-Hans/app");
     expect(withLocale("/", "zh-CN")).toBe("/zh-Hans");

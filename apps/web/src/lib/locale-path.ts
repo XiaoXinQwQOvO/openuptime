@@ -21,6 +21,9 @@ export function withLocale(path: string, locale: string): string {
   return `/${prefix}${rest === "/" ? "" : rest}${m[2]}`;
 }
 
+/** Pages rendered per request (the status pages): the static asset store never has a file for them. */
+export const renderedPerRequest = (rest: string) => /^\/status(\/|$)/.test(rest);
+
 /** Locale of the page being viewed, from its URL (null = default English). */
 export const pageLocale = (): PrefixedLocale | null =>
   typeof location === "undefined" ? null : splitLocale(location.pathname).locale;

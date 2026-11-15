@@ -29,6 +29,14 @@ export interface ChangelogEntry {
 /** Community entries, newest first within a day. Cloud-only entries are added by changelog-cloud.ts. */
 export const COMMUNITY_ENTRIES: ChangelogEntry[] = [
   {
+    id: "zh-hans-status-page-language", date: "2026-11-15", edition: "community",
+    title: { en: "Chinese status pages in Chinese", zh: "中文状态页显示中文" },
+    summary: { en: "The Chinese address of a status page now renders the page in Chinese, not just its language tag.", zh: "状态页的中文地址现在会把页面内容渲染成中文，而不只是标记语言。" },
+    points: [
+      { en: "On a self-hosted install, /zh-Hans/status/<slug> shows the headings, states and dates in Chinese; before, only the page's language attribute was Chinese.", zh: "自托管部署中，/zh-Hans/status/<slug> 的标题、状态和时间都会显示为中文；此前只有页面的语言标记是中文。" },
+    ],
+  },
+  {
     id: "mysql-database", date: "2026-11-15", edition: "community",
     title: { en: "Run on MySQL 8", zh: "改用 MySQL 8" },
     summary: { en: "Self-hosted installs now store their data in MySQL 8 instead of PostgreSQL.", zh: "自托管部署的数据存储从 PostgreSQL 改为 MySQL 8。" },
