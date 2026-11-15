@@ -1,0 +1,298 @@
+---
+export const prerender = false;
+import Base from "../../layouts/Base.astro";
+import { apiFetch, PRODUCT_URL } from "../../lib/server";
+import { translate } from "../../lib/i18n";
+import { siteLogo } from "../../lib/brand";
+
+type Status = {
+  page: { title: string; slug: string; externalUrl?: string | null; hideBranding?: boolean; uptimeOkPct?: number; uptimeWarnPct?: number; customCss?: string | null };
+  bucket?: "hour" | "day";
+  overall: "operational" | "degraded" | "outage" | "unknown";
+  components: { id: string; name: string; group?: string | null; status: string; uptime90d: number | null; uptime7d?: number | null; uptime30d?: number | null; days: { day: string; uptime: number }[] }[];
+  incidents: { id: string; number?: number | null; title: string; status: string; updates: { id: string; body: string; status: string; createdAt: string }[] }[];
+};
+const { slug } = Astro.params;
+// ?embed=1 is the compact layout for an <iframe>: status, incidents and components only
+const embed = Astro.url.searchParams.get("embed") === "1";
+type History = { items: { id: string; number?: number | null; rootCause?: string | null; postmortem?: string | null; title: string; status: string; startedAt: string; resolvedAt: string | null; updates: { id: string; body: string; status: string; createdAt: string }[] }[]; next: string | null };
+const before = Astro.url.searchParams.get("before");
+// the two reads do not depend on each other
+type Maint = { items: { id: string; name: string; startsAt: string; endsAt: string; state: "scheduled" | "active" | "completed" }[] };
+const [{ status, data, privateResponse }, hist, maint] = await Promise.all([
+  apiFetch<Status>(`/api/public/status/${slug}`, Astro.request),
+  // the embedded layout shows no history
+  embed ? Promise.resolve({ status: 200, data: null as History | null, privateResponse: false }) : apiFetch<History>(`/api/public/status/${slug}/incidents${before ? `?before=${encodeURIComponent(before)}` : ""}`, Astro.request),
+  apiFetch<Maint>(`/api/public/status/${slug}/maintenance`, Astro.request),
+]);
+// a policy that is down answers 503: show that, not a missing page
+if (status === 503) return new Response("Unavailable", { status: 503, headers: { "cache-control": "private, no-store" } });
+if (status === 404 || !data) return new Response("Not found", { status: 404, headers: { "cache-control": "private, no-store" } });
+const history = hist.data ?? { items: [], next: null };
+// windows that are running or still ahead; finished ones are not news
+const windows = (maint.data?.items ?? []).filter((w) => w.state !== "completed");
+const fmtWin = (iso: string) => new Date(iso).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+const activeIds = new Set(data.incidents.map((i) => i.id));
+history.items = history.items.filter((i) => !activeIds.has(i.id));
+// a visitor may narrow the bars to the last 7 or 30 days; hourly history (a new page) always shows 90 hours
+const daily = data.bucket !== "hour";
+const askedRange = Number(Astro.url.searchParams.get("range"));
+const range = daily && (askedRange === 7 || askedRange === 30) ? askedRange : 90;
+const uptimeOf = (c: Status["components"][number]) => (range === 7 ? c.uptime7d ?? null : range === 30 ? c.uptime30d ?? null : c.uptime90d);
+const withRange = (q: string) => (range === 90 ? q : `${q}${q ? "&" : "?"}range=${range}`);
+const rangeHref = (n: number) => `/status/${slug}${[n === 90 ? "" : `range=${n}`, embed ? "embed=1" : ""].filter(Boolean).join("&").replace(/^(?=.)/, "?")}`;
+// always `range` slots (oldest → now); buckets without checks render as grey "no data"
+function slots(days: { day: string; uptime: number }[]) {
+  const hourly = data?.bucket === "hour";
+  const by = new Map(days.map((d) => [d.day, d.uptime]));
+  return Array.from({ length: range }, (_, i) => {
+    const at = new Date(Date.now() - (range - 1 - i) * (hourly ? 36e5 : 864e5)).toISOString();
+    const day = hourly ? at.slice(0, 13) : at.slice(0, 10);
+    return { day: hourly ? day.replace("T", " ") + ":00" : day, uptime: by.get(day) ?? null };
+  });
+}
+const notice = Astro.url.searchParams.get("subscribed") ? "You’re subscribed. We’ll email you about incidents." : Astro.url.searchParams.get("unsubscribed") ? "You’ve been unsubscribed." : "";
+
+const zhPage = Astro.request.headers.get("x-ou-lang") === "zh-CN";
+const base = `${Astro.url.origin}`;
+const canon = `${base}${zhPage ? "/zh-Hans" : ""}/status/${slug}`;
+
+const t = (x: string) => translate((Astro.locals.lang ?? "en"), x);
+const headline = t({ operational: "Everything is running smoothly.", degraded: "Some systems are degraded.", outage: "We’re experiencing an outage.", unknown: "Some component states are unknown." }[data.overall]);
+const overallText = (o: string) => (o === "operational" ? t("All systems operational") : o === "outage" ? t("Major outage") : o === "unknown" ? t("Status unknown") : t("Partial degradation"));
+const groupNames = [...new Set(data.components.map((c) => c.group || "Services"))];
+const withUp = data.components.map(uptimeOf).filter((u): u is number => u != null);
+const avgUp = withUp.length ? withUp.reduce((a, u) => a + u, 0) / withUp.length : null;
+const opCount = data.components.filter((c) => c.status === "up" || c.status === "operational").length;
+const fmtDay = (d: string) => new Date(d).toLocaleDateString((Astro.locals.lang ?? "en") === "zh-CN" ? "zh-CN" : "en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+const stageCls = (st: string) => (st === "resolved" ? "ok" : st === "monitoring" ? "mon" : "");
+// the page owner picks where green ends and amber ends (percent); a bad pair falls back to the defaults
+const okAt = (data.page.uptimeOkPct ?? 99.9) / 100;
+const warnAt = (data.page.uptimeWarnPct ?? 98) / 100;
+const dayClass = (u: number) => (u >= okAt ? "" : u >= warnAt ? "w" : "d");
+const hideBrand = !!data.page.hideBranding;
+// a page that links to its own website shows that website's logo in place of OpenUptime's mark
+const logo = siteLogo(data.page.externalUrl);
+// the owner's stylesheet was checked when it was saved; anything that could close the element is still kept out here
+const customCss = data.page.customCss && !/</.test(data.page.customCss) ? data.page.customCss : null;
+// images, fonts and media only from where the page itself loads them, so a stylesheet cannot reach anywhere else
+Astro.response.headers.set("content-security-policy", "img-src 'self' data: https://favicon.im; font-src 'self' data: https://fonts.gstatic.com; media-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'");
+Astro.response.headers.set("cache-control", privateResponse || hist.privateResponse || maint.privateResponse ? "private, no-store" : "public, max-age=30, s-maxage=30");
+---
+<Base title={`${data.page.title} · Status`}>
+  <Fragment slot="head">
+    {!hideBrand && <meta name="generator" content="openuptime.app" />}
+    <link rel="canonical" href={canon} />
+    {embed && <meta name="robots" content="noindex" />}
+    {embed && <base target="_top" />}
+    <link rel="alternate" type="application/rss+xml" title={`${data.page.title} status`} href={`${base}/api/public/status/${slug}/rss.xml`} />
+    <link rel="alternate" hreflang="en" href={`${base}/status/${slug}`} />
+    <link rel="alternate" hreflang="zh-Hans" href={`${base}/zh-Hans/status/${slug}`} />
+    <link rel="alternate" hreflang="x-default" href={`${base}/status/${slug}`} />
+    {customCss && <style is:inline set:html={customCss} />}
+  </Fragment>
+  <div class={embed ? "pub embed" : "pub"}>
+    {!embed && <header class="pub-top"><div class="pub-wrap pub-top-in">
+      <span class="pub-brand">{!hideBrand && !logo && <span class="mk"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5-6 4 12 2.5-6H21" /></svg></span>}{logo && <img class="pub-logo" src={logo} width="26" height="26" alt="" referrerpolicy="no-referrer" loading="eager" decoding="async" />}{data.page.title}{data.page.externalUrl && (
+        <a class="pub-ext" href={data.page.externalUrl} target="_blank" rel="nofollow noopener noreferrer" aria-label={t("Visit website")} title={t("Visit website")}><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></svg></a>
+      )}</span>
+      <a class="btn sm primary" href="#subscribe">{t("Subscribe")}</a>
+    </div></header>}
+
+    <main class="pub-wrap">
+      <section class="pub-hd">
+        <div>
+          <span class={`pill ${data.overall === "outage" ? "down" : data.overall === "degraded" ? "degraded" : data.overall === "unknown" ? "unknown" : "up"}`}>{overallText(data.overall)}</span>
+          <h1>{headline}</h1>
+        </div>
+        {avgUp != null && (
+          <div class="pub-ring" role="img" aria-label={`${avgUp.toFixed(2)}%`}>
+            <b>{avgUp.toFixed(2)}%</b><span>{t(`${range}-day uptime`)}</span>
+          </div>
+        )}
+      </section>
+
+      {!embed && <div class="pub-kpis">
+        <div><b>{opCount}/{data.components.length}</b><span>{t("Components operational")}</span></div>
+        <div><b>{data.incidents.length}</b><span>{t("Active incidents")}</span></div>
+        <div><b>{history.items.length}{history.next ? "+" : ""}</b><span>{t("Past incidents")}</span></div>
+      </div>}
+
+      {notice && <p class="pill up" style="margin-bottom:16px">{t(notice)}</p>}
+
+      <div class="pub-grid">
+        <div class="pub-col">
+          {data.incidents.map((i) => (
+            <article class="card pub-inc live">
+              <div class="pub-inc-h"><h3>{i.number ? <small class="mono muted">INC-{i.number} </small> : null}{i.title}</h3><span class={`pill ${i.status}`}>{t(i.status)}</span></div>
+              <div class="pub-ups">
+                {i.updates.map((u) => <div class={`up ${stageCls(u.status)}`}><div class="up-h"><b>{t(u.status)}</b><span>{new Date(u.createdAt).toISOString().slice(0, 16).replace("T", " ")} UTC</span></div><p>{u.body}</p></div>)}
+              </div>
+            </article>
+          ))}
+
+          {windows.length > 0 && (
+            <section class="card pub-inc" aria-labelledby="maint-h">
+              <div class="pub-inc-h"><h3 id="maint-h">{t("Scheduled maintenance")}</h3></div>
+              <div class="pub-ups">
+                {windows.map((w) => (
+                  <div class={`up ${w.state === "active" ? "" : "mon"}`}>
+                    <div class="up-h"><b>{w.name}</b><span>{w.state === "active" ? t("In progress") : t("Upcoming")}</span></div>
+                    <p><time datetime={w.startsAt}>{fmtWin(w.startsAt)}</time> – <time datetime={w.endsAt}>{fmtWin(w.endsAt)}</time></p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          <div class="pub-st"><h2>{t("Components")}</h2>
+            {daily && (
+              <nav class="pub-range" aria-label={t("Uptime range")}>
+                {[7, 30, 90].map((n) => <a href={rangeHref(n)} aria-current={n === range ? "true" : undefined}>{t(`Last ${n} days`)}</a>)}
+              </nav>
+            )}
+            <div class="pub-legend"><span><i></i>{t("Operational")}</span><span><i class="w"></i>{t("Degraded")}</span><span><i class="d"></i>{t("Outage")}</span></div>
+          </div>
+          <div class="card pub-comps">
+            {groupNames.map((g) => (
+              <>
+                {(groupNames.length > 1 || g !== "Services") && <div class="pub-grp">{g}</div>}
+                {data.components.filter((c) => (c.group || "Services") === g).map((c) => (
+                  <div class="pub-row" data-c={c.id} data-name={c.name}>
+                    <div class="pub-row-h">
+                      <span class="pub-row-n"><i class={`sd ${c.status === "up" || c.status === "operational" ? "" : c.status === "degraded" ? "w" : c.status === "unknown" ? "unknown" : "d"}`}></i>{c.name}</span>
+                      <span class="pub-row-v"><span class={`pub-s ${c.status === "up" || c.status === "operational" ? "" : c.status === "degraded" ? "w" : c.status === "unknown" ? "unknown" : "d"}`}>{t(c.status)}</span><b>{uptimeOf(c)?.toFixed(2) ?? "—"}%</b></span>
+                    </div>
+                    <div class="bars">
+                      {slots(c.days).map((d) => {
+                        const label = d.uptime == null ? `${d.day} · ${t("No data")}` : `${d.day} · ${(d.uptime * 100).toFixed(2)}%`;
+                        // a day can be opened to list what happened on it; hours are too fine for that
+                        return daily
+                          ? <i class={d.uptime == null ? "n" : dayClass(d.uptime)} title={label} aria-label={label} role="button" tabindex="0" data-day={d.day} />
+                          : <i class={d.uptime == null ? "n" : dayClass(d.uptime)} title={label} />;
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </>
+            ))}
+            {data.components.length === 0 && <p class="muted" style="padding:22px">{t("Nothing to show yet.")}</p>}
+            <div class="pub-axis"><span>{data?.bucket === "hour" ? t("90 hours ago") : t(`${range} days ago`)}</span><span>{t("Today")}</span></div>
+          </div>
+          <section class="card pub-day" id="pub-day" hidden aria-live="polite">
+            <div class="pub-inc-h"><h3 id="pub-day-h"></h3><button type="button" class="icon-btn" id="pub-day-x" aria-label={t("Close")} title={t("Close")}>×</button></div>
+            <div class="pub-ups" id="pub-day-list"></div>
+          </section>
+
+          {!embed && <>
+          <div class="pub-st gap"><h2>{t("Past incidents")}</h2></div>
+          <div class="card pub-incs">
+            {history.items.length === 0 && <p class="muted" style="padding:6px 0">{t("No incidents reported.")}</p>}
+            {history.items.map((i) => (
+              <article class="pub-pi">
+                <div class="pub-pi-d"><b>{fmtDay(i.startedAt)}</b><span>{new Date(i.startedAt).getUTCFullYear()}</span></div>
+                <div class="pub-pi-c">
+                  <div class="pub-inc-h"><h3>{i.number ? <small class="mono muted">INC-{i.number} </small> : null}{i.title}</h3>{!i.resolvedAt && <span class="pill down">{t("ongoing")}</span>}</div>
+                  <div class="pub-ups">
+                    {i.updates.map((u) => <div class={`up ${stageCls(u.status)}`}><div class="up-h"><b>{t(u.status)}</b><span>{new Date(u.createdAt).toISOString().slice(0, 16).replace("T", " ")} UTC</span></div><p>{u.body}</p></div>)}
+                  </div>
+                  {i.rootCause && <p class="pub-rc" style="margin-top:10px"><b>{t("Root cause")}:</b> {i.rootCause}</p>}
+                  {i.postmortem && <details class="pub-pm" style="margin-top:8px"><summary>{t("Postmortem")}</summary><p style="white-space:pre-wrap">{i.postmortem}</p></details>}
+                </div>
+              </article>
+            ))}
+          </div>
+          <div class="pub-pager">
+            {before && <a href={`/status/${slug}${withRange("")}`}>{t("Newest")}</a>}
+            {history.next && <a href={`/status/${slug}${withRange(`?before=${encodeURIComponent(history.next)}`)}`}>{t("Older incidents")}</a>}
+          </div>
+          </>}
+          {embed && <p class="pub-full"><a href={canon} target="_top">{t("View the full status page")}</a></p>}
+        </div>
+
+        {!embed && <aside class="pub-side">
+          <section class="card pub-sub" id="subscribe">
+            <h3>{t("Get updates")}</h3>
+            <p class="muted">{t("We’ll email you when something breaks and when it’s fixed.")}</p>
+            <form id="sub">
+              <input class="in" type="email" name="email" required placeholder="you@example.com" aria-label="Email" />
+              {data.components.length > 1 && (
+                <details class="pub-pick">
+                  <summary class="muted">{t("Only these components (all if none are ticked)")}</summary>
+                  {data.components.map((c) => <label><input type="checkbox" name="monitorId" value={c.id} /> {c.name}</label>)}
+                </details>
+              )}
+              <button class="btn primary" type="submit">{t("Subscribe")}</button>
+            </form>
+            <p id="sub-msg" class="muted" role="status"></p>
+            <p class="faint" style="font-size:13px">{t("Lost your link? Enter your address again and we’ll send a new one.")}</p>
+            <a href={`/api/public/status/${slug}/rss.xml`} class="pub-rss">RSS</a>
+            <a href={`/api/public/status/${slug}/maintenance.ics`} class="pub-rss">{t("Maintenance calendar")}</a>
+            <a href={`/api/public/status/${slug}/llms.txt`} class="pub-rss">llms.txt</a>
+          </section>
+        </aside>}
+      </div>
+    </main>
+
+    <footer class="pub-wrap pub-foot">
+      {!hideBrand && <span>{t("Powered by")} <a href={PRODUCT_URL}>OpenUptime</a></span>}
+    </footer>
+    <script is:inline data-astro-rerun define:vars={{ slug, none: t("No incidents on this day."), loading: t("Loading…"), failed: t("Could not load this day."), everywhere: t("Affects all components"), words: Object.fromEntries(["investigating", "identified", "monitoring", "resolved"].map((w) => [w, t(w)])) }}>
+      // a day's bar opens the incidents that were open on it; everything is written with textContent
+      const panel = document.getElementById("pub-day");
+      const list = document.getElementById("pub-day-list");
+      const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+      let asked = 0;
+      async function openDay(bar) {
+        const row = bar.closest(".pub-row");
+        const day = bar.dataset.day;
+        const ask = ++asked;
+        document.getElementById("pub-day-h").textContent = `${row.dataset.name} · ${bar.getAttribute("aria-label")}`;
+        list.replaceChildren(el("p", "muted", loading));
+        panel.hidden = false;
+        row.after(panel);
+        try {
+          const r = await fetch(`/api/public/status/${slug}/incidents?day=${day}`);
+          if (!r.ok) throw new Error();
+          const { items } = await r.json();
+          if (ask !== asked) return;
+          const mine = items.filter((i) => i.componentId == null || i.componentId === row.dataset.c);
+          if (!mine.length) { list.replaceChildren(el("p", "muted", none)); return; }
+          list.replaceChildren(...mine.map((i) => {
+            const box = el("div", `up ${i.resolvedAt ? "ok" : ""}`);
+            const head = el("div", "up-h");
+            head.append(el("b", null, `${i.number ? `INC-${i.number} ` : ""}${i.title}`), el("span", null, `${i.startedAt.slice(0, 16).replace("T", " ")} UTC${i.resolvedAt ? ` – ${i.resolvedAt.slice(0, 16).replace("T", " ")} UTC` : ""}`));
+            box.append(head);
+            const last = i.updates[0];
+            if (last) box.append(el("p", null, `${words[last.status] ?? last.status}: ${last.body}`));
+            if (i.componentId == null) box.append(el("p", "faint", everywhere));
+            return box;
+          }));
+        } catch { if (ask === asked) list.replaceChildren(el("p", "err", failed)); }
+      }
+      document.querySelectorAll(".bars i[data-day]").forEach((bar) => {
+        bar.addEventListener("click", () => openDay(bar));
+        bar.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDay(bar); } });
+      });
+      document.getElementById("pub-day-x").addEventListener("click", () => { panel.hidden = true; asked++; });
+    </script>
+    {!embed && <script is:inline data-astro-rerun define:vars={{ slug, sending: t("Subscribing…"), ok: t("Check your inbox to confirm your subscription."), bad: t("Could not subscribe. Try again."), slow: t("Too many attempts. Please try again later.") }}>
+      document.getElementById("sub").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const msg = document.getElementById("sub-msg");
+        const btn = e.target.querySelector("button");
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = sending;
+        msg.textContent = "";
+        try {
+          const r = await fetch(`/api/public/status/${slug}/subscribe`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: e.target.email.value, monitorIds: [...e.target.querySelectorAll("input[name=monitorId]:checked")].map((x) => x.value) }) });
+          msg.textContent = r.ok ? ok : r.status === 429 ? slow : bad;
+          if (r.ok) e.target.reset();
+        } catch { msg.textContent = bad; }
+        btn.disabled = false;
+        btn.textContent = label;
+      });
+    </script>}
+  </div>
+</Base>

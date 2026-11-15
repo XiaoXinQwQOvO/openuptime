@@ -1,0 +1,111 @@
+import { mcpConfigSchema, mcpToolsSchema } from "../../api/src/mcp-config";
+import { HTTP_METHODS, HTTP_REQUEST_CAPABILITY, requestBodyProblem } from "../../api/src/http-request";
+import { runCheck, type CheckInput } from "../../api/src/checker";
+import { JSON_ASSERT_CAPABILITY, jsonAssertionsSchema } from "../../api/src/json-assert";
+import { targetProblem } from "../../api/src/netguard";
+import { ENVELOPE_HEADER, MCP_MONITOR_CAPABILITY, SIGNATURE_HEADER, TIMESTAMP_HEADER, probeHeadersPlausible, verifyProbe, verifyProbeEnvelope } from "../../api/src/probe-protocol";
+
+/** Any request whose length is not vouched for by a valid envelope signature: every non-MCP check fits. */
+export const SMALL_BODY_BYTES = 64 * 1024;
+/**
+ * Upper bound for a body whose declared length the scheduler signed (MCP schema baselines may occupy up to 4 MiB;
+ * the remaining room covers the configuration and headers). Only MCP checks may use more than SMALL_BODY_BYTES.
+ */
+export const MAX_BODY_BYTES = 5 * 1024 * 1024;
+
+const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+
+/** The scheduler's request, or the reason it is not acceptable. Only the types a probe runs; nothing else is let through. */
+export function parseCheck(raw: unknown): { input: CheckInput } | { error: string } {
+  const o = raw as Record<string, unknown> | null;
+  if (!o || typeof o !== "object" || Array.isArray(o)) return { error: "Expected a JSON object" };
+  if (o.type !== "http" && o.type !== "tcp" && o.type !== "websocket" && o.type !== "mcp") return { error: "type must be http, tcp, websocket or mcp" };
+  if (typeof o.target !== "string" || !o.target || o.target.length > 2048) return { error: "target is required" };
+  const method = o.method ?? "GET";
+  if (typeof method !== "string" || !(HTTP_METHODS as readonly string[]).includes(method)) return { error: "Unsupported HTTP method" };
+  const requestBody = o.requestBody ?? null;
+  if (requestBody !== null && typeof requestBody !== "string") return { error: "requestBody must be a string" };
+  const problem = requestBodyProblem({ type: o.type, method, requestBody });
+  if (problem) return { error: problem };
+  const expectedStatus = o.expectedStatus ?? 200;
+  if (!Number.isInteger(expectedStatus) || (expectedStatus as number) < 100 || (expectedStatus as number) > 599) return { error: "expectedStatus is out of range" };
+  const timeoutMs = o.timeoutMs ?? 10000;
+  if (!Number.isInteger(timeoutMs) || (timeoutMs as number) < (o.type === "mcp" ? 1 : 1000) || (timeoutMs as number) > 30000) return { error: "timeoutMs is outside the permitted range" };
+  const keyword = o.keyword ?? null;
+  if (keyword !== null && (typeof keyword !== "string" || keyword.length > 500)) return { error: "keyword must be a string" };
+  const keywordMode = o.keywordMode ?? "contains";
+  if (keywordMode !== "contains" && keywordMode !== "absent") return { error: "keywordMode must be contains or absent" };
+  const expectedLocation = o.expectedLocation ?? null;
+  if (expectedLocation !== null && (typeof expectedLocation !== "string" || expectedLocation.length > 2048)) return { error: "expectedLocation must be a string" };
+  const headers = o.headers ?? {};
+  if (typeof headers !== "object" || Array.isArray(headers) || headers === null) return { error: "headers must be an object" };
+  const entries = Object.entries(headers as Record<string, unknown>);
+  if (entries.length > 50 || entries.some(([k, v]) => typeof v !== "string" || k.length > 100 || v.length > (o.type === "mcp" && k.toLowerCase() === "authorization" ? 8200 : 2000))) return { error: "headers are not acceptable" };
+  const wsMessage = o.wsMessage ?? null;
+  if (wsMessage !== null && (typeof wsMessage !== "string" || wsMessage.length > 2000)) return { error: "wsMessage must be a string" };
+  const jsonAssertions = jsonAssertionsSchema.safeParse(o.jsonAssertions ?? []);
+  if (!jsonAssertions.success) return { error: "jsonAssertions are not acceptable" };
+  const mcpConfig = o.type === "mcp" ? mcpConfigSchema.nullable().safeParse(o.mcpConfig ?? null) : null;
+  const mcpBaseline = o.type === "mcp" ? mcpToolsSchema.nullable().safeParse(o.mcpBaseline ?? null) : null;
+  if (mcpConfig && !mcpConfig.success) return { error: "Invalid MCP configuration" };
+  if (mcpBaseline && !mcpBaseline.success) return { error: "Invalid MCP baseline" };
+  // OAuth grants are coordinated centrally so regions never race rotating a refresh token.
+  if (mcpConfig?.success && mcpConfig.data?.oauth) return { error: "Resolve MCP OAuth before dispatching to a probe" };
+  return {
+    input: {
+      type: o.type, target: o.target, method, expectedStatus: expectedStatus as number, timeoutMs: timeoutMs as number,
+      keyword: keyword as string | null, keywordMode, expectedLocation: expectedLocation as string | null, headers: Object.fromEntries(entries) as Record<string, string>,
+      wsMessage: wsMessage as string | null, requestBody, jsonAssertions: jsonAssertions.data,
+      ...(mcpConfig?.success ? { mcpConfig: mcpConfig.data } : {}),
+      ...(mcpBaseline?.success ? { mcpBaseline: mcpBaseline.data } : {}),
+    },
+  };
+}
+
+/**
+ * One check on request. The same code answers on every platform (Vercel function, plain Node server); only the thin
+ * adapters around it differ. Nothing here depends on where it runs, so the region a result comes from is the place the
+ * function is deployed to.
+ */
+export async function handleProbe(req: Request, o: { secret: string | undefined; region?: string }): Promise<Response> {
+  if (req.method === "GET") return json(200, { ok: true, region: o.region ?? null, capabilities: [HTTP_REQUEST_CAPABILITY, MCP_MONITOR_CAPABILITY, JSON_ASSERT_CAPABILITY] });
+  if (req.method !== "POST") return json(405, { error: "POST a check to this endpoint" });
+  if (!o.secret) return json(503, { error: "Probe has no PROBE_SECRET configured" });
+  const declared = req.headers.get("content-length");
+  const length = declared !== null && /^\d{1,10}$/.test(declared) ? Number(declared) : null;
+  if (length !== null && length > MAX_BODY_BYTES) return json(413, { error: "Request too large" });
+  // Nothing is buffered for a request that cannot be the scheduler's: stale or missing timestamp, no signature.
+  const timestamp = req.headers.get(TIMESTAMP_HEADER), signature = req.headers.get(SIGNATURE_HEADER);
+  if (!probeHeadersPlausible({ timestamp, signature })) return json(401, { error: "Bad or expired signature" });
+  // A large body is read only when the scheduler signed its exact length; anyone else gets the small limit.
+  const vouched = length !== null && length > SMALL_BODY_BYTES
+    && await verifyProbeEnvelope(o.secret, { timestamp, envelope: req.headers.get(ENVELOPE_HEADER), byteLength: length });
+  if (length !== null && length > SMALL_BODY_BYTES && !vouched) return json(413, { error: "Request too large" });
+  const limit = vouched ? length! : SMALL_BODY_BYTES;
+  const reader = req.body?.getReader();
+  if (!reader) return json(400, { error: "Body is required" });
+  let text = "", bytes = 0;
+  const decoder = new TextDecoder();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > limit) return json(413, { error: "Request too large" });
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+  } finally { void reader.cancel().catch(() => {}); }
+  const verified = await verifyProbe(o.secret, { timestamp, signature, body: text });
+  if (!verified) return json(401, { error: "Bad or expired signature" });
+  let raw: unknown;
+  try { raw = JSON.parse(text); } catch { return json(400, { error: "Body is not valid JSON" }); }
+  const parsed = parseCheck(raw);
+  if ("error" in parsed) return json(400, { error: parsed.error });
+  if (bytes > SMALL_BODY_BYTES && parsed.input.type !== "mcp") return json(413, { error: "Request too large" });
+  // a signed request is still not allowed to aim the probe at a private address
+  const blocked = await targetProblem(parsed.input.type, parsed.input.target);
+  if (blocked) return json(400, { error: blocked, code: "target_not_allowed" });
+  const outcome = await runCheck(parsed.input);
+  return json(200, outcome);
+}

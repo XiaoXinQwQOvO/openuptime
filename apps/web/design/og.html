@@ -1,0 +1,65 @@
+<!doctype html>
+<!-- Source of public/og.png (1200x630). Render with:
+     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless --hide-scrollbars --window-size=1200,630 \
+       --virtual-time-budget=8000 --screenshot=public/og.png file://$PWD/design/og.html -->
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@500&display=block" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;margin:0}
+  html,body{width:1200px;height:630px;overflow:hidden}
+  body{background:linear-gradient(180deg,#eef7f1 0%,#f7f8f6 70%);color:#0b1310;font-family:"Geist",system-ui,sans-serif;position:relative}
+  .grid{position:absolute;inset:0;background-image:linear-gradient(rgba(11,19,16,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(11,19,16,.05) 1px,transparent 1px);
+    background-size:64px 64px;-webkit-mask-image:radial-gradient(ellipse 70% 60% at 50% 30%,#000 0%,transparent 100%)}
+  .glow{position:absolute;right:-220px;bottom:-300px;width:760px;height:760px;border-radius:50%;
+    background:radial-gradient(closest-side,rgba(15,157,88,.14),rgba(15,157,88,0))}
+  .beat{position:absolute;left:0;top:348px;width:1200px;height:120px;opacity:.5}
+  .frame{position:absolute;inset:0;padding:64px 72px;display:flex;flex-direction:column}
+  .top{display:flex;align-items:center;justify-content:space-between}
+  .brand{display:flex;align-items:center;gap:16px;font-weight:600;font-size:34px;letter-spacing:-.01em}
+  .mk{width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#0f9d58,#0a5c34);display:grid;place-items:center}
+  .mk svg{width:32px;height:32px}
+  .pill{display:flex;align-items:center;gap:10px;height:44px;padding:0 20px;border-radius:99px;font-size:22px;font-weight:500;
+    color:#0f9d58;background:rgba(15,157,88,.1);border:1px solid rgba(15,157,88,.3)}
+  .pill i{width:11px;height:11px;border-radius:50%;background:#0f9d58;box-shadow:0 0 0 5px rgba(15,157,88,.18)}
+  h1{position:relative;font-weight:600;font-size:80px;line-height:1.08;letter-spacing:-.045em;margin-top:58px}
+  h1 span{display:block}
+  h1 b{font-weight:inherit}
+  h1 .ai{display:inline-block;padding:0 .16em .04em;margin:0 .06em;border-radius:.16em;background:#e7f5ed;
+    box-shadow:inset 0 0 0 1.5px rgba(15,157,88,.22);color:#0a7a43;line-height:1.02}
+  .bars{display:flex;gap:7px;height:46px;margin-top:auto;align-items:stretch}
+  .bars b{flex:1;border-radius:5px;background:#0f9d58}
+  .bars b.w{background:#c98a0a}
+  .bars b.f{opacity:.55}
+  .foot{display:flex;justify-content:space-between;align-items:baseline;margin-top:26px;font-size:26px;color:#5a635d}
+  .foot span:last-child{font-family:"Geist Mono",ui-monospace,monospace;font-weight:500;color:#0e1411;font-size:26px}
+</style>
+</head>
+<body>
+<div class="grid"></div>
+<div class="glow"></div>
+<svg class="beat" viewBox="0 0 1200 120" fill="none"><defs><linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="#0f9d58" stop-opacity="0"/><stop offset=".5" stop-color="#0f9d58" stop-opacity=".55"/><stop offset="1" stop-color="#0f9d58" stop-opacity="0"/></linearGradient></defs>
+  <path d="M0 60H760l14-34 20 68 16-50 10 16H1200" stroke="url(#g)" stroke-width="2.5" stroke-linejoin="round"/></svg>
+<div class="frame">
+  <div class="top">
+    <div class="brand">
+      <div class="mk"><svg viewBox="0 0 32 32"><path d="M5 16h5.5l3-8 5 16 3-8H27" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      OpenUptime
+    </div>
+    <div class="pill"><i></i>All systems operational</div>
+  </div>
+  <h1><span>Affordable uptime monitoring</span><span>your <b class="ai">AI agent</b> can manage.</span></h1>
+  <div class="bars" id="bars"></div>
+  <div class="foot"><span>Open source · Checks, alerts and status pages</span><span>openuptime.app</span></div>
+</div>
+<script>
+  // 60 daily bars: all up, one slow day. Fixed positions so the image is reproducible.
+  var el=document.getElementById("bars"),h="";
+  for(var i=0;i<60;i++){h+='<b class="'+(i===37?"w":"")+(i>=57?" f":"")+'"></b>'}
+  el.innerHTML=h;
+</script>
+</body>
+</html>
