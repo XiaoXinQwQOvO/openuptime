@@ -8,3 +8,6 @@ dist
 .DS_Store
 apps/web/public/sitemap.xml
 .vercel
+# CodeArts 工具目录
+.arts/
+.codeartsdoer/
